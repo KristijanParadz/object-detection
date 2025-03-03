@@ -1,8 +1,13 @@
 import cv2
+import torch
 from ultralytics import YOLO
 
-# Load the YOLOv8 model
-model = YOLO('yolov8n.pt')  # Load a pretrained YOLOv8n model
+# Check if CUDA is available
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f"Using device: {device}")
+
+# Load the YOLOv8 model on the appropriate device
+model = YOLO('yolov8n.pt').to(device)  # Load a pretrained YOLOv8n model
 
 # Open the video file
 video_path = 'videos/hd_0.mp4'  # Replace with your video file path
@@ -20,15 +25,14 @@ while cap.isOpened():
         break
     
     frame = cv2.resize(frame, resized_shape)
-    frame=cv2.colo
     frame_counter += 1
 
     if frame_counter % skip_interval != 0:
         cv2.imshow("YOLOv8 Tracking", frame)
         continue
 
-
-    results = model.track(frame, persist=True, verbose=False)
+    # Convert frame to tensor and move to the selected device
+    results = model.track(frame, persist=True, verbose=False, device=device)
 
     # Visualize the results on the frame
     if results and results[0].boxes:
@@ -44,7 +48,6 @@ while cap.isOpened():
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
-   
 
 # Release the video capture object and close the display window
 cap.release()
