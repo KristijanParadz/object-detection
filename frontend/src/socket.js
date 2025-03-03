@@ -8,9 +8,12 @@ export const state = reactive({
 
 const URL = "http://localhost:8000";
 
-export const socket = io(URL);
+export const socket = io(URL, {
+  path: "/socket.io"
+});
 
 socket.on("connect", () => {
+  socket.emit("start")
   state.connected = true;
 });
 

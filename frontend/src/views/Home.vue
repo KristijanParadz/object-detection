@@ -38,13 +38,6 @@ const angle = computed(() => {
           >Angle: <span class="old-font">{{ angle }}</span></span
         >
       </div>
-      <div class="status-and-graph-container">
-        <div class="status-container">
-          <span class="text-bold">Status</span>
-          
-          <span class="text-bold history-text">History</span>
-        </div>
-      </div>
     </div>
   </main>
 </template>
@@ -86,8 +79,8 @@ const angle = computed(() => {
 .image-container {
   border: 2px solid #44a9b2;
   border-radius: 8px;
-  width: 378px;
-  aspect-ratio: 1 / 1;
+  width: 990px;
+  aspect-ratio: 16 / 9;
   display: flex;
   flex-direction: column;
   justify-content: center;

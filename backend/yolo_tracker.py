@@ -1,10 +1,12 @@
 import cv2
 import torch
 from ultralytics import YOLO
+import base64
 
 class YOLOVideoTracker:
-    def __init__(self, video_path, model_path='yolov8n.pt', skip_interval=3, resized_shape=(990, 540)):
+    def __init__(self, video_path, sio, model_path='yolov8n.pt', skip_interval=3, resized_shape=(990, 540)):
         self.video_path = video_path
+        self.sio = sio
         self.model_path = model_path
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
@@ -16,7 +18,6 @@ class YOLOVideoTracker:
         self.frame_counter = -1
     
     def process_frame(self, frame):
-        frame = cv2.resize(frame, self.resized_shape)
         results = self.model.track(frame, persist=True, verbose=False, device=self.device)
         
         if results and results[0].boxes:
@@ -28,25 +29,34 @@ class YOLOVideoTracker:
                             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (0, 255, 0), 1)
         return frame
     
-    def run(self):
+    async def run(self):
         while self.cap.isOpened():
             success, frame = self.cap.read()
             if not success:
                 break
             
             self.frame_counter += 1
+            frame = cv2.resize(frame, self.resized_shape)
+
             if self.frame_counter % self.skip_interval != 0:
-                cv2.imshow("YOLOv8 Tracking", frame)
+                # cv2.imshow("YOLOv8 Tracking", frame)
+                # await self.send_image_to_frontend(frame)
                 continue
             
             frame = self.process_frame(frame)
-            cv2.imshow("YOLOv8 Tracking", frame)
+            await self.send_image_to_frontend(frame)
+            # cv2.imshow("YOLOv8 Tracking", frame)
             
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            # if cv2.waitKey(1) & 0xFF == ord("q"):
+            #     break
         
         self.cap.release()
-        cv2.destroyAllWindows()
+        # cv2.destroyAllWindows()
+    
+    async def send_image_to_frontend(self, image):
+        _, buffer = cv2.imencode('.jpg', image)
+        base64_jpg = base64.b64encode(buffer).decode('utf-8')
+        await self.sio.emit('image', {"image" : base64_jpg})
 
 if __name__ == "__main__":
     video_tracker = YOLOVideoTracker(video_path='videos/hd_0.mp4')
