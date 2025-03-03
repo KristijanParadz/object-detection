@@ -11,7 +11,6 @@ const URL = "http://localhost:8000";
 export const socket = io(URL);
 
 socket.on("connect", () => {
-  socket.emit("test_event", { data: "Test data from client" });
   state.connected = true;
 });
 
