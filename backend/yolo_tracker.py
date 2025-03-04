@@ -2,6 +2,7 @@ import cv2
 import torch
 from ultralytics import YOLO
 import base64
+from pathlib import Path
 
 class YOLOVideoTracker:
     def __init__(self, video_path, sio, model_path='yolov8n.pt', skip_interval=3, resized_shape=(990, 540)):
@@ -16,6 +17,7 @@ class YOLOVideoTracker:
         self.model = YOLO(self.model_path).to(self.device)
         self.cap = cv2.VideoCapture(self.video_path)
         self.frame_counter = -1
+        self.video_id = Path(video_path).stem
     
     def process_frame(self, frame):
         results = self.model.track(frame, persist=True, verbose=False, device=self.device)
@@ -59,5 +61,5 @@ class YOLOVideoTracker:
         await self.sio.emit('image', {"image" : base64_jpg})
 
 if __name__ == "__main__":
-    video_tracker = YOLOVideoTracker(video_path='videos/hd_0.mp4')
+    video_tracker = YOLOVideoTracker(video_path='videos/hd_0.mp4', sio="")
     video_tracker.run()
