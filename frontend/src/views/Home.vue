@@ -1,14 +1,35 @@
 <script setup>
-import { state as socketState } from "@/socket";
+import { state as socketState, socket } from "@/socket";
 import { computed } from "vue";
 
+// Expose images from socket state
 const images = computed(() => socketState.images);
 
+
+function pauseVideo() {
+  socket.emit("pause");
+}
+
+function resumeVideo() {
+  socket.emit("resume");
+}
+
+function resetVideo() {
+  socket.emit("reset");
+}
 </script>
 
 <template>
   <main>
     <img src="../assets/protostar-logo.png" alt="protostar-logo" />
+
+    <!-- Button row for user controls -->
+    <div class="button-row">
+      <button @click="pauseVideo">Pause</button>
+      <button @click="resumeVideo">Resume</button>
+      <button @click="resetVideo">Reset</button>
+    </div>
+
     <div class="container">
       <div class="camera-container">
         <span class="text-bold">Camera View</span>
@@ -18,9 +39,9 @@ const images = computed(() => socketState.images);
             <h3>{{ key }}</h3>
             <div class="image-container">
               <img
-              :src="`data:image/jpg;base64,${value}`"
-              alt="input"
-              class="input-image"
+                :src="`data:image/jpg;base64,${value}`"
+                alt="input"
+                class="input-image"
               />
             </div>
           </div>
@@ -30,14 +51,14 @@ const images = computed(() => socketState.images);
           <img src="../assets/no-image.png" alt="input is missing" />
           <span>No image available</span>
         </div>
-       
+
       </div>
     </div>
   </main>
 </template>
 
 <style scoped>
-.images-container{
+.images-container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 2rem;
@@ -62,19 +83,6 @@ const images = computed(() => socketState.images);
   font-weight: 700;
 }
 
-.status-and-graph-container {
-  display: flex;
-  flex-direction: column;
-  gap: 5rem;
-}
-
-.status-container {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-  align-items: flex-start;
-}
-
 .image-container {
   border: 2px solid #44a9b2;
   border-radius: 8px;
@@ -93,19 +101,15 @@ const images = computed(() => socketState.images);
   border-radius: 5px;
 }
 
-.history-text {
+/* New row for our buttons */
+.button-row {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
   margin-top: 2rem;
 }
 
-.angle-text {
-  font-size: 1.2rem;
-  align-self: center;
-}
-
-.old-font {
-  font-family: sans-serif;
-}
-
+/* Responsive styling */
 @media (max-width: 1150px) {
   .container {
     gap: 5rem;
@@ -126,10 +130,6 @@ const images = computed(() => socketState.images);
   .text-bold {
     margin-left: 0;
     text-align: center;
-  }
-
-  .status-and-graph-container {
-    align-items: center;
   }
 }
 </style>

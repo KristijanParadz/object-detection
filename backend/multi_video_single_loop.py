@@ -1,4 +1,5 @@
 import cv2
+import asyncio
 from yolo_tracker import YOLOVideoTracker
 
 class MultiVideoSingleLoop:
@@ -17,11 +18,19 @@ class MultiVideoSingleLoop:
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
         
-        
+        # Control flags
+        self.paused = False
+        self.stopped = False
+
+        # Build initial trackers
+        self._init_trackers()
+
+    def _init_trackers(self):
+        """Helper to create a YOLOVideoTracker for each path."""
         self.trackers = []
         for vp in self.video_paths:
             tracker = YOLOVideoTracker(
-                video_path=vp, 
+                video_path=vp,
                 sio=self.sio,
                 model_path=self.model_path,
                 skip_interval=self.skip_interval,
@@ -31,44 +40,83 @@ class MultiVideoSingleLoop:
 
     async def run(self):
         """
-        Single loop that attempts to read from each video tracker 
-        and processes frames until all are done.
+        Main loop that attempts to read from each video until done or stopped.
+        We use paused/stopped to control the flow.
         """
-        while True:
+        self.stopped = False
+        
+        while not self.stopped:
+            # If paused, sleep briefly and do not read new frames.
+            if self.paused:
+                await asyncio.sleep(0.05)
+                continue
+
             any_frame_ok = False
 
-            # Loop over each tracker
+            # Loop over each tracker (video)
             for tracker in self.trackers:
-                cap = tracker.cap
-                if not cap.isOpened():
-                    continue  # This video is finished
-                
-                success, frame = cap.read()
+                if not tracker.cap.isOpened():
+                    continue  # This video is finished or can't open
+
+                success, frame = tracker.cap.read()
                 if not success:
-                    # End of this video
-                    cap.release()
+                    # No more frames in this video
+                    tracker.cap.release()
                     continue
-                
+
                 any_frame_ok = True
-                
-                # Update the tracker's frame counter
+
+                # Update frame count
                 tracker.frame_counter += 1
-                
+
                 # Resize frame
                 frame = cv2.resize(frame, tracker.resized_shape)
-                
+
                 # Check skip interval
                 if tracker.frame_counter % tracker.skip_interval != 0:
-                    # Optionally emit the raw frame or do nothing
                     continue
-                
-                # Process frame with YOLO
+
+                # YOLO processing
                 processed_frame = tracker.process_frame(frame)
 
-                
-                # Emit with the video_id so the frontend can tell them apart
+                # Emit the processed frame
                 await tracker.send_image_to_frontend(processed_frame)
 
-            # If we couldn't read a frame from any video, break out
+            # If we couldn't read a frame from *any* video, break out
             if not any_frame_ok:
                 break
+
+        # Cleanup once loop is done or forcibly stopped
+        for tracker in self.trackers:
+            if tracker.cap.isOpened():
+                tracker.cap.release()
+
+    def pause(self):
+        """Pause the loop (no new frames are read)."""
+        self.paused = True
+
+    def resume(self):
+        """Resume the loop (start reading frames again)."""
+        self.paused = False
+
+    async def reset(self):
+        """
+        Reset videos to frame=0 by:
+          1) Stopping the current loop.
+          2) Re-init trackers.
+          3) Starting run() again in a fresh task.
+        """
+        # Signal the current loop to stop
+        self.stopped = True
+        # Let the loop exit gracefully
+        await asyncio.sleep(0.1)
+
+        # Re-initialize trackers
+        self._init_trackers()
+
+        # Clear flags
+        self.stopped = False
+        self.paused = False
+
+        # Start again
+        asyncio.create_task(self.run())
