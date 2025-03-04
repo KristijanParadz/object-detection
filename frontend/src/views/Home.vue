@@ -1,11 +1,8 @@
 <script setup>
 import { state as socketState } from "@/socket";
-import { computed, ref } from "vue";
+import { computed } from "vue";
 
-const image = computed(() => socketState.image);
-const angle = computed(() => {
-  return socketState.angle;
-});
+const images = computed(() => socketState.images);
 
 </script>
 
@@ -16,33 +13,35 @@ const angle = computed(() => {
       <div class="camera-container">
         <span class="text-bold">Camera View</span>
 
-        <div v-if="image === 'unprocessable'" class="image-container">
-          <img src="../assets/warning.png" alt="warning icon" />
-          <span>Not processable image</span>
-        </div>
-
-        <div v-else-if="image" class="image-container">
-          <img
-            :src="`data:image/jpg;base64,${image}`"
-            alt="input"
-            class="input-image"
-          />
+        <div v-if="images && Object.keys(images).length > 0" class="images-container">
+          <div v-for="(value, key) in images" :key="key">
+            <h3>{{ key }}</h3>
+            <div class="image-container">
+              <img
+              :src="`data:image/jpg;base64,${value}`"
+              alt="input"
+              class="input-image"
+              />
+            </div>
+          </div>
         </div>
 
         <div v-else class="image-container">
           <img src="../assets/no-image.png" alt="input is missing" />
           <span>No image available</span>
         </div>
-
-        <span v-if="angle" class="angle-text"
-          >Angle: <span class="old-font">{{ angle }}</span></span
-        >
+       
       </div>
     </div>
   </main>
 </template>
 
 <style scoped>
+.images-container{
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2rem;
+}
 .container {
   display: flex;
   gap: 13rem;
@@ -79,7 +78,7 @@ const angle = computed(() => {
 .image-container {
   border: 2px solid #44a9b2;
   border-radius: 8px;
-  width: 990px;
+  width: 640px;
   aspect-ratio: 16 / 9;
   display: flex;
   flex-direction: column;

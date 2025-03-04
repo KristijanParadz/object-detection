@@ -5,7 +5,7 @@ import base64
 from pathlib import Path
 
 class YOLOVideoTracker:
-    def __init__(self, video_path, sio, model_path='yolov8n.pt', skip_interval=3, resized_shape=(990, 540)):
+    def __init__(self, video_path, sio, model_path, skip_interval, resized_shape):
         self.video_path = video_path
         self.sio = sio
         self.model_path = model_path
@@ -58,7 +58,7 @@ class YOLOVideoTracker:
     async def send_image_to_frontend(self, image):
         _, buffer = cv2.imencode('.jpg', image)
         base64_jpg = base64.b64encode(buffer).decode('utf-8')
-        await self.sio.emit('image', {"image" : base64_jpg})
+        await self.sio.emit('image', {"video_id": self.video_id, "image": base64_jpg})
 
 if __name__ == "__main__":
     video_tracker = YOLOVideoTracker(video_path='videos/hd_0.mp4', sio="")

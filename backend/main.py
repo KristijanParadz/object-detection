@@ -2,7 +2,7 @@ import uvicorn
 import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from yolo_tracker import YOLOVideoTracker
+from multi_video_single_loop import MultiVideoSingleLoop
 
 # 1. Create a Socket.IO server (async_mode="asgi" is important for FastAPI/ASGI apps).
 sio = socketio.AsyncServer(
@@ -41,8 +41,13 @@ async def disconnect(sid):
 
 @sio.event
 async def start(sid):
-    video_tracker = YOLOVideoTracker(video_path='videos/hd_0.mp4', sio=sio)
-    await video_tracker.run()
+    video_paths = [
+    'videos/hd_0.mp4',
+    'videos/hd_3.mp4'
+    ]
+
+    multi_video_tracker = MultiVideoSingleLoop(video_paths=video_paths, sio=sio)
+    await multi_video_tracker.run()
 
 if __name__ == "__main__":
     # Note: we run `socket_app`, not just `app`

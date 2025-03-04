@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 
 export const state = reactive({
   connected: false,
-  image: null,
+  images: {},
 });
 
 const URL = "http://localhost:8000";
@@ -22,5 +22,5 @@ socket.on("disconnect", () => {
 });
 
 socket.on("image", (data) => {
-  state.image = data.image;
+  state.images[data.video_id] = data.image;
 });
