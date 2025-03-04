@@ -81,6 +81,9 @@ class MultiVideoSingleLoop:
         for tracker in self.trackers:
             if tracker.cap.isOpened():
                 tracker.cap.release()
+    
+    def stop(self):
+        self.stopped = True
 
     def pause(self):
         """Pause the loop (no new frames are read)."""

@@ -42,6 +42,8 @@ async def connect(sid, environ):
 @sio.event
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
+    global multi_video_tracker
+    multi_video_tracker.stop()
 
 @sio.event
 async def start(sid):
@@ -74,6 +76,15 @@ async def pause(sid):
     if multi_video_tracker:
         multi_video_tracker.pause()
 
+@sio.event
+async def stop(sid):
+    """
+    PAUSE event: tell the tracker to stop processing frames (but not exit).
+    """
+    global multi_video_tracker
+    if multi_video_tracker:
+        multi_video_tracker.stop()
+
 
 @sio.event
 async def resume(sid):
@@ -100,4 +111,4 @@ async def reset(sid):
 
 if __name__ == "__main__":
     # Run `socket_app`, not just `app`
-    uvicorn.run(socket_app, host="127.0.0.1", port=8000)
+    uvicorn.run("main:socket_app", host="127.0.0.1", port=8000, reload=True)

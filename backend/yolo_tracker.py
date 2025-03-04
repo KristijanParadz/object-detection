@@ -12,7 +12,6 @@ class YOLOVideoTracker:
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        print(f"Using device: {self.device}")
         
         self.model = YOLO(self.model_path).to(self.device)
         self.cap = cv2.VideoCapture(self.video_path)

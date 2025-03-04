@@ -17,6 +17,10 @@ function resumeVideo() {
 function resetVideo() {
   socket.emit("reset");
 }
+
+function stopVideo() {
+  socket.emit("stop");
+}
 </script>
 
 <template>
@@ -28,6 +32,7 @@ function resetVideo() {
       <button @click="pauseVideo">Pause</button>
       <button @click="resumeVideo">Resume</button>
       <button @click="resetVideo">Reset</button>
+      <button @click="stopVideo">Stop</button>
     </div>
 
     <div class="container">
