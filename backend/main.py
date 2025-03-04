@@ -38,15 +38,9 @@ async def connect(sid, environ):
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
 
-@sio.event
-async def message(sid, data):
-    print(f"Message from {sid}: {data}")
-    # Echo the message back to the sender
-    await sio.emit("message", f"Server says: {data}", to=sid)
 
 @sio.event
 async def start(sid):
-    print("something")
     video_tracker = YOLOVideoTracker(video_path='videos/hd_0.mp4', sio=sio)
     await video_tracker.run()
 
