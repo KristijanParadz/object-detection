@@ -8,7 +8,7 @@ class MultiVideoSingleLoop:
         video_paths, 
         sio, 
         model_path='yolov8n.pt', 
-        skip_interval=3, 
+        skip_interval=5, 
         resized_shape=(640, 360)
     ):
      
@@ -39,54 +39,45 @@ class MultiVideoSingleLoop:
             self.trackers.append(tracker)
 
     async def run(self):
-        """
-        Main loop that attempts to read from each video until done or stopped.
-        We use paused/stopped to control the flow.
-        """
         self.stopped = False
-        
         while not self.stopped:
-            # If paused, sleep briefly and do not read new frames.
             if self.paused:
                 await asyncio.sleep(0.05)
                 continue
 
             any_frame_ok = False
 
-            # Loop over each tracker (video)
             for tracker in self.trackers:
                 if not tracker.cap.isOpened():
-                    continue  # This video is finished or can't open
+                    continue
 
                 success, frame = tracker.cap.read()
                 if not success:
-                    # No more frames in this video
+                    # No more frames
                     tracker.cap.release()
                     continue
 
                 any_frame_ok = True
-
-                # Update frame count
                 tracker.frame_counter += 1
 
-                # Resize frame
+                # Resize
                 frame = cv2.resize(frame, tracker.resized_shape)
 
-                # Check skip interval
-                if tracker.frame_counter % tracker.skip_interval != 0:
-                    continue
+                # Decide whether to run YOLO or just reuse old boxes
+                if tracker.frame_counter % tracker.skip_interval == 0:
+                    # Run actual YOLO detection, draw bounding boxes, and store them
+                    processed_frame = tracker.process_frame(frame)
+                else:
+                    # Reuse last boxes on this new frame (no new detection)
+                    processed_frame = tracker.draw_last_boxes(frame)
 
-                # YOLO processing
-                processed_frame = tracker.process_frame(frame)
-
-                # Emit the processed frame
+                # Send every frame to the frontend
                 await tracker.send_image_to_frontend(processed_frame)
 
-            # If we couldn't read a frame from *any* video, break out
             if not any_frame_ok:
                 break
 
-        # Cleanup once loop is done or forcibly stopped
+        # Cleanup
         for tracker in self.trackers:
             if tracker.cap.isOpened():
                 tracker.cap.release()
