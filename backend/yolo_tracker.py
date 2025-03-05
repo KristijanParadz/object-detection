@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import base64
 from pathlib import Path
 
+
 class YOLOVideoTracker:
     def __init__(self, video_path, sio, model_path, skip_interval, resized_shape):
         self.video_path = video_path
@@ -12,7 +13,7 @@ class YOLOVideoTracker:
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
+
         self.model = YOLO(self.model_path).to(self.device)
         self.cap = cv2.VideoCapture(self.video_path)
         self.frame_counter = -1
@@ -27,16 +28,17 @@ class YOLOVideoTracker:
         Perform actual YOLO detection/tracking, update self.last_xyxy/self.last_ids,
         and draw the bounding boxes.
         """
-        results = self.model.track(frame, persist=True, verbose=False, device=self.device)
-        
+        results = self.model.track(
+            frame, persist=True, verbose=False, device=self.device)
+
         self.last_xyxy = []
         self.last_ids = []
-        
+
         if results and len(results) > 0 and results[0].boxes:
             for i, box in enumerate(results[0].boxes.xyxy):
                 x1, y1, x2, y2 = map(int, box[:4])
                 # Track ID might be None sometimes, so handle carefully
-                track_id = (results[0].boxes.id[i] 
+                track_id = (results[0].boxes.id[i]
                             if results[0].boxes.id is not None else i)
 
                 self.last_xyxy.append((x1, y1, x2, y2))

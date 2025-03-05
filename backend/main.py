@@ -23,10 +23,12 @@ app.add_middleware(
 )
 
 # 3. Wrap our FastAPI app with socketio's ASGI app:
-socket_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")
+socket_app = socketio.ASGIApp(
+    sio, other_asgi_app=app, socketio_path="socket.io")
 
 # We'll keep a global reference here for simplicity:
 multi_video_tracker = None
+
 
 @app.get("/")
 def read_root():
@@ -35,15 +37,19 @@ def read_root():
 # ----------------------------------------------------
 # Socket.IO event handlers
 # ----------------------------------------------------
+
+
 @sio.event
 async def connect(sid, environ):
     print(f"Client connected: {sid}")
+
 
 @sio.event
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
     global multi_video_tracker
     multi_video_tracker.stop()
+
 
 @sio.event
 async def start(sid):
@@ -75,6 +81,7 @@ async def pause(sid):
     global multi_video_tracker
     if multi_video_tracker:
         multi_video_tracker.pause()
+
 
 @sio.event
 async def stop(sid):

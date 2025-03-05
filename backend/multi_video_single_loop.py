@@ -2,22 +2,23 @@ import cv2
 import asyncio
 from yolo_tracker import YOLOVideoTracker
 
+
 class MultiVideoSingleLoop:
     def __init__(
-        self, 
-        video_paths, 
-        sio, 
-        model_path='yolov8n.pt', 
-        skip_interval=5, 
+        self,
+        video_paths,
+        sio,
+        model_path='yolov8n.pt',
+        skip_interval=5,
         resized_shape=(640, 360)
     ):
-     
+
         self.video_paths = video_paths
         self.sio = sio
         self.model_path = model_path
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
-        
+
         # Control flags
         self.paused = False
         self.stopped = False
@@ -81,7 +82,7 @@ class MultiVideoSingleLoop:
         for tracker in self.trackers:
             if tracker.cap.isOpened():
                 tracker.cap.release()
-    
+
     def stop(self):
         self.stopped = True
 
