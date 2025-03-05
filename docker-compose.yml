@@ -3,6 +3,19 @@ services:
     build: ./frontend
     ports:
       - "8080:8080"
-    # volumes:
-    #   - .:/app
-    #   - /app/node_modules
+    container_name: frontend
+
+  backend:
+    build: ./backend
+    volumes:
+      - ./backend/videos:/app/videos
+    ports:
+      - "8000:8000"
+    container_name: backend
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

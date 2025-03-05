@@ -60,6 +60,8 @@ async def start(sid):
     global multi_video_tracker
     video_paths = [
         'videos/hd_0.mp4',
+        # 'videos/hd_1.mp4',
+        # 'videos/hd_2.mp4',
         'videos/hd_3.mp4'
     ]
 
@@ -118,4 +120,4 @@ async def reset(sid):
 
 if __name__ == "__main__":
     # Run `socket_app`, not just `app`
-    uvicorn.run("main:socket_app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:socket_app", host="0.0.0.0", port=8000, reload=True)

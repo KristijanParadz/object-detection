@@ -6,7 +6,7 @@ export const state = reactive({
   images: {},
 });
 
-const URL = "http://localhost:8000";
+const URL = import.meta.env.VITE_API_BASE_URL;
 
 export const socket = io(URL, {
   path: "/socket.io",
