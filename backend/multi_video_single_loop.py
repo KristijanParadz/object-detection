@@ -5,7 +5,7 @@ from camera_calibration import CameraCalibration
 
 
 class MultiVideoSingleLoop:
-    def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(1080, 720), calib_file='calibration/calibration.json'):
+    def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(640, 360), calib_file='calibration/calibration.json'):
         self.video_paths = video_paths
         self.sio = sio
         self.model_path = model_path
