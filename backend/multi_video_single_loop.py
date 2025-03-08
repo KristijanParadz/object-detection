@@ -1,23 +1,19 @@
 import cv2
 import asyncio
 from yolo_tracker import YOLOVideoTracker
+from camera_calibration import CameraCalibration
 
 
 class MultiVideoSingleLoop:
-    def __init__(
-        self,
-        video_paths,
-        sio,
-        model_path='yolov8n.pt',
-        skip_interval=5,
-        resized_shape=(640, 360)
-    ):
-
+    def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(1080, 720), calib_file='calibration/calibration.json'):
         self.video_paths = video_paths
         self.sio = sio
         self.model_path = model_path
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
+
+        # Load calibration
+        self.calib = CameraCalibration(calib_file)
 
         # Control flags
         self.paused = False
@@ -35,7 +31,8 @@ class MultiVideoSingleLoop:
                 sio=self.sio,
                 model_path=self.model_path,
                 skip_interval=self.skip_interval,
-                resized_shape=self.resized_shape
+                resized_shape=self.resized_shape,
+                calib=self.calib
             )
             self.trackers.append(tracker)
 
@@ -54,7 +51,6 @@ class MultiVideoSingleLoop:
 
                 success, frame = tracker.cap.read()
                 if not success:
-                    # No more frames
                     tracker.cap.release()
                     continue
 
@@ -64,21 +60,17 @@ class MultiVideoSingleLoop:
                 # Resize
                 frame = cv2.resize(frame, tracker.resized_shape)
 
-                # Decide whether to run YOLO or just reuse old boxes
+                # Run YOLO detection or reuse old boxes
                 if tracker.frame_counter % tracker.skip_interval == 0:
-                    # Run actual YOLO detection, draw bounding boxes, and store them
                     processed_frame = tracker.process_frame(frame)
                 else:
-                    # Reuse last boxes on this new frame (no new detection)
                     processed_frame = tracker.draw_last_boxes(frame)
 
-                # Send every frame to the frontend
                 await tracker.send_image_to_frontend(processed_frame)
 
             if not any_frame_ok:
                 break
 
-        # Cleanup
         for tracker in self.trackers:
             if tracker.cap.isOpened():
                 tracker.cap.release()

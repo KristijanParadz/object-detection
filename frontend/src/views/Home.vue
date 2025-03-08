@@ -5,7 +5,6 @@ import { computed } from "vue";
 // Expose images from socket state
 const images = computed(() => socketState.images);
 
-
 function pauseVideo() {
   socket.emit("pause");
 }
@@ -39,7 +38,10 @@ function stopVideo() {
       <div class="camera-container">
         <span class="text-bold">Camera View</span>
 
-        <div v-if="images && Object.keys(images).length > 0" class="images-container">
+        <div
+          v-if="images && Object.keys(images).length > 0"
+          class="images-container"
+        >
           <div v-for="(value, key) in images" :key="key">
             <h3>{{ key }}</h3>
             <div class="image-container">
@@ -56,7 +58,6 @@ function stopVideo() {
           <img src="../assets/no-image.png" alt="input is missing" />
           <span>No image available</span>
         </div>
-
       </div>
     </div>
   </main>

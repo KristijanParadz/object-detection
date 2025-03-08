@@ -59,10 +59,10 @@ async def start(sid):
     """
     global multi_video_tracker
     video_paths = [
-        'videos/hd_0.mp4',
-        # 'videos/hd_1.mp4',
-        # 'videos/hd_2.mp4',
-        'videos/hd_3.mp4'
+        'videos/hd_00_00.mp4',
+        # 'videos/hd_00_01.mp4',
+        # 'videos/hd_00_02.mp4',
+        'videos/hd_00_03.mp4'
     ]
 
     # Create a new MultiVideoSingleLoop instance
