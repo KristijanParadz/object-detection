@@ -58,3 +58,11 @@ class CameraCalibration:
         world_coords = R_inv @ (s * ray - t)
 
         return world_coords[0][0], world_coords[1][0]
+
+
+class CalibrationParameters:
+    def __init__(self, K, distCoef, R, t):
+        self.K = K
+        self.distCoef = distCoef
+        self.R = R
+        self.t = t

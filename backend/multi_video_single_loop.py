@@ -1,11 +1,12 @@
 import cv2
 import asyncio
 from yolo_tracker import YOLOVideoTracker
-from camera_calibration import CameraCalibration
+from camera_calibration import CameraCalibration, CalibrationParameters
+from pathlib import Path
 
 
 class MultiVideoSingleLoop:
-    def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(640, 360), calib_file='calibration/calibration.json'):
+    def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(640, 360), calibration_file='calibration/calibration.json'):
         self.video_paths = video_paths
         self.sio = sio
         self.model_path = model_path
@@ -13,7 +14,7 @@ class MultiVideoSingleLoop:
         self.resized_shape = resized_shape
 
         # Load calibration
-        self.calib = CameraCalibration(calib_file)
+        self.calibration_data = CameraCalibration(calibration_file)
 
         # Control flags
         self.paused = False
@@ -26,13 +27,22 @@ class MultiVideoSingleLoop:
         """Helper to create a YOLOVideoTracker for each path."""
         self.trackers = []
         for vp in self.video_paths:
+            video_id = Path(vp).stem
+            current_camera_calibration_data = self.calibration_data.cameras[video_id]
+            calibration_params = CalibrationParameters(
+                K=current_camera_calibration_data["K"],
+                distCoef=current_camera_calibration_data["distCoef"],
+                R=current_camera_calibration_data["R"],
+                t=current_camera_calibration_data["t"],
+            )
             tracker = YOLOVideoTracker(
                 video_path=vp,
                 sio=self.sio,
                 model_path=self.model_path,
                 skip_interval=self.skip_interval,
                 resized_shape=self.resized_shape,
-                calib=self.calib
+                calibration=calibration_params,
+                video_id=video_id
             )
             self.trackers.append(tracker)
 
