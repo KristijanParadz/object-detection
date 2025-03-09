@@ -6,6 +6,49 @@ import cv2
 import asyncio
 from pathlib import Path
 
+import torchvision.models as models
+import torch.nn as nn
+import torchvision.transforms as transforms
+
+# ReIDModel for computing embeddings
+
+
+class ReIDModel:
+    def __init__(self, device):
+        self.device = device
+        # Load a pre-trained ResNet50 model and remove its final classification layer
+        base_model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        # output shape: [B, 2048, 1, 1]
+        self.model = nn.Sequential(*(list(base_model.children())[:-1]))
+        self.model.eval()
+        self.model.to(self.device)
+        # Typical pre-processing for ImageNet models; reid models may use different sizes
+        self.transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((256, 128)),  # common size for reid
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
+
+    def get_embedding(self, image):
+        """
+        Given a BGR image crop (numpy array), return a normalized embedding vector.
+        """
+        # Convert BGR to RGB for PIL
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        input_tensor = self.transform(image_rgb).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            embedding = self.model(input_tensor)  # shape: [1, 2048, 1, 1]
+        embedding = embedding.view(
+            embedding.size(0), -1)  # flatten to [1, 2048]
+        embedding = embedding.cpu().numpy()[0]
+        # Normalize the embedding
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            embedding = embedding / norm
+        return embedding
+
 
 class MultiVideoSingleLoop:
     def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(640, 360)):
@@ -125,9 +168,13 @@ class YOLOVideoTracker:
         self.frame_counter = -1
         self.video_id = video_id
 
-        # For storing last known boxes
+        # For storing last known boxes and embeddings
         self.last_xyxy = []
         self.last_ids = []
+        # Dictionary to store embeddings and class labels: {track_id: (embedding, class_id)}
+        self.embeddings = {}
+        # ReID model instance
+        self.reid_model = ReIDModel(self.device)
 
     def process_frame(self, frame):
         results = self.model.track(
@@ -140,17 +187,31 @@ class YOLOVideoTracker:
         if results and len(results) > 0 and results[0].boxes:
             for i, box in enumerate(results[0].boxes.xyxy):
                 x1, y1, x2, y2 = map(int, box[:4])
-                # Get center of bounding box
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-
                 # Get unique tracking ID
-                track_id = (results[0].boxes.id[i]
-                            if results[0].boxes.id is not None else i)
+                track_id = int(results[0].boxes.id[i]
+                               if results[0].boxes.id is not None else i)
+                # Attempt to retrieve class id (if provided by YOLO)
+                class_id = int(
+                    results[0].boxes.cls[i]) if results[0].boxes.cls is not None else None
 
                 self.last_xyxy.append((x1, y1, x2, y2))
                 self.last_ids.append(track_id)
 
-            # Draw the new boxes on this frame
+                # Only compute the embedding the first time this track_id is seen
+                if track_id not in self.embeddings:
+                    print(track_id)
+                    # Crop the detection from the frame; note: adjust if needed for padding etc.
+                    crop = frame[y1:y2, x1:x2]
+                    embedding = self.reid_model.get_embedding(crop)
+                    # Save a tuple of (embedding, class_id) for later use (e.g. cosine similarity comparisons)
+                    self.embeddings[track_id] = (embedding, class_id)
+
+            # Filter embeddings: remove entries for tracks not present in this frame
+            active_ids = set(self.last_ids)
+            self.embeddings = {
+                tid: emb for tid, emb in self.embeddings.items() if tid in active_ids}
+
+            # Draw the new boxes on this frame (and optionally display the class)
             for (x1, y1, x2, y2), track_id in zip(self.last_xyxy, self.last_ids):
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
                 cv2.putText(frame, f'ID: {int(track_id)}',
@@ -167,8 +228,22 @@ class YOLOVideoTracker:
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
             cv2.putText(frame, f'ID: {int(track_id)}',
                         (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, (0, 255, 0), 1)
-
         return frame
+
+    # def compute_cosine_similarity(self, track_id1, track_id2):
+    #     """
+    #     Example helper: Compute cosine similarity between embeddings for two track_ids,
+    #     but only if they belong to the same class. Returns None if classes differ or
+    #     if embeddings are not available.
+    #     """
+    #     if track_id1 in self.embeddings and track_id2 in self.embeddings:
+    #         emb1, class1 = self.embeddings[track_id1]
+    #         emb2, class2 = self.embeddings[track_id2]
+    #         if class1 == class2:
+    #             # Cosine similarity (embeddings assumed to be normalized)
+    #             similarity = np.dot(emb1, emb2)
+    #             return similarity
+    #     return None
 
     async def send_image_to_frontend(self, image):
         _, buffer = cv2.imencode('.jpg', image)
