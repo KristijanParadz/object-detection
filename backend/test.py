@@ -5,6 +5,7 @@ import torch
 import cv2
 import asyncio
 from pathlib import Path
+import random
 
 import torchvision.models as models
 import torch.nn as nn
@@ -203,8 +204,9 @@ class YOLOVideoTracker:
                     crop = frame[y1:y2, x1:x2]
                     embedding = self.reid_model.get_embedding(crop)
                     # Save a tuple of (embedding, class_id) for later use (e.g. cosine similarity comparisons)
-                    self.embeddings[track_id] = (embedding, class_id)
-
+                    color = (random.randint(0, 255), random.randint(
+                        0, 255), random.randint(0, 255))
+                    self.embeddings[track_id] = (embedding, class_id, color)
             # Filter embeddings: remove entries for tracks not present in this frame
             active_ids = set(self.last_ids)
             self.embeddings = {
@@ -212,9 +214,10 @@ class YOLOVideoTracker:
 
             # Draw the new boxes on this frame (and optionally display the class)
             for (x1, y1, x2, y2), track_id in zip(self.last_xyxy, self.last_ids):
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                color = self.embeddings[track_id][2]
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
                 cv2.putText(frame, f'ID: {int(track_id)}',
-                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, (0, 255, 0), 1)
+                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, color, 1)
 
         return frame
 
@@ -224,9 +227,10 @@ class YOLOVideoTracker:
         on the given frame without running YOLO again.
         """
         for (x1, y1, x2, y2), track_id in zip(self.last_xyxy, self.last_ids):
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            color = self.embeddings[track_id][2]
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
             cv2.putText(frame, f'ID: {int(track_id)}',
-                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, (0, 255, 0), 1)
+                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, color, 1)
         return frame
 
     # def compute_cosine_similarity(self, track_id1, track_id2):
