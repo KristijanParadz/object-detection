@@ -199,7 +199,6 @@ class YOLOVideoTracker:
 
                 # Only compute the embedding the first time this track_id is seen
                 if track_id not in self.embeddings:
-                    print(track_id)
                     # Crop the detection from the frame; note: adjust if needed for padding etc.
                     crop = frame[y1:y2, x1:x2]
                     embedding = self.reid_model.get_embedding(crop)
