@@ -11,7 +11,9 @@ import torchvision.models as models
 import torch.nn as nn
 import torchvision.transforms as transforms
 
+# -------------------
 # ReIDModel for computing embeddings
+# -------------------
 
 
 class ReIDModel:
@@ -51,8 +53,12 @@ class ReIDModel:
         return embedding
 
 
+# -------------------
+# MultiVideoSingleLoop - manager for multiple cameras
+# -------------------
 class MultiVideoSingleLoop:
-    def __init__(self, video_paths, sio, model_path='yolov8n.pt', skip_interval=5, resized_shape=(640, 360)):
+    def __init__(self, video_paths, sio, model_path='yolov8n.pt',
+                 skip_interval=5, resized_shape=(640, 360)):
         self.video_paths = video_paths
         self.sio = sio
         self.model_path = model_path
@@ -63,11 +69,13 @@ class MultiVideoSingleLoop:
         self.paused = False
         self.stopped = False
 
-        # Build initial trackers
+        # Create trackers for each camera
         self._init_trackers()
 
+        # Similarity threshold
+        self.similarity_threshold = 0.3  # can tune as needed
+
     def _init_trackers(self):
-        """Helper to create a YOLOVideoTracker for each path."""
         self.trackers = []
         for vp in self.video_paths:
             video_id = Path(vp).stem
@@ -89,7 +97,9 @@ class MultiVideoSingleLoop:
                 continue
 
             any_frame_ok = False
+            processed_frames = []
 
+            # 1) For each camera, read a frame and run YOLO detection/tracking
             for tracker in self.trackers:
                 if not tracker.cap.isOpened():
                     continue
@@ -111,11 +121,22 @@ class MultiVideoSingleLoop:
                 else:
                     processed_frame = tracker.draw_last_boxes(frame)
 
-                await tracker.send_image_to_frontend(processed_frame)
+                # Store (tracker, processed_frame) so we can re-draw after cross-camera matching
+                processed_frames.append((tracker, processed_frame))
 
             if not any_frame_ok:
                 break
 
+            # 2) Cross-camera matching
+            self.cross_camera_match()
+
+            # 3) Re-draw bounding boxes with updated display ID/color
+            #    and send to the frontend
+            for (tracker, cached_frame) in processed_frames:
+                final_frame = tracker.draw_last_boxes(cached_frame)
+                await tracker.send_image_to_frontend(final_frame)
+
+        # Release
         for tracker in self.trackers:
             if tracker.cap.isOpened():
                 tracker.cap.release()
@@ -124,38 +145,72 @@ class MultiVideoSingleLoop:
         self.stopped = True
 
     def pause(self):
-        """Pause the loop (no new frames are read)."""
         self.paused = True
 
     def resume(self):
-        """Resume the loop (start reading frames again)."""
         self.paused = False
 
     async def reset(self):
-        """
-        Reset videos to frame=0 by:
-          1) Stopping the current loop.
-          2) Re-init trackers.
-          3) Starting run() again in a fresh task.
-        """
-        # Signal the current loop to stop
         self.stopped = True
-        # Let the loop exit gracefully
         await asyncio.sleep(0.1)
-
-        # Re-initialize trackers
         self._init_trackers()
-
-        # Clear flags
         self.stopped = False
         self.paused = False
-
-        # Start again
         asyncio.create_task(self.run())
 
+    # ------------------------------------
+    # Cross-camera matching step
+    # ------------------------------------
+    def cross_camera_match(self):
+        """
+        1. Collect all embeddings from each camera for the current frame.
+        2. Compare each pair from different cameras with the same class.
+        3. If similarity > threshold, set cameraB's display_id/color to cameraA's.
+        """
+        # Gather all
+        all_detections = []  # list of (tracker, local_id, embedding, class_id)
+        for tracker in self.trackers:
+            for local_id, (emb, c_id, local_color, disp_id, disp_color) in tracker.embeddings.items():
+                all_detections.append((tracker, local_id, emb, c_id))
 
+        # Compare each pair
+        for i in range(len(all_detections)):
+            trackerA, idA, embA, clsA = all_detections[i]
+            for j in range(i + 1, len(all_detections)):
+                trackerB, idB, embB, clsB = all_detections[j]
+
+                # Different camera, same class
+                if trackerA is trackerB:
+                    continue
+                if clsA != clsB:
+                    continue
+
+                # Cosine similarity
+                sim = float(np.dot(embA, embB))
+                if sim > self.similarity_threshold:
+                    # They match => cameraB's display = cameraA's display
+
+                    # Retrieve camera A's display_id and color
+                    # (embedding, class_id, local_color, display_id, display_color)
+                    _, _, _, a_disp_id, a_disp_color = trackerA.embeddings[idA]
+
+                    # Overwrite cameraB's display id/color
+                    embB_orig, clsB_orig, locB, _, _ = trackerB.embeddings[idB]
+                    trackerB.embeddings[idB] = (
+                        embB_orig,  # same embedding
+                        clsB_orig,  # same class
+                        locB,       # same local color
+                        a_disp_id,  # new display ID
+                        a_disp_color  # new display color
+                    )
+
+
+# -------------------
+# YOLOVideoTracker - single camera
+# -------------------
 class YOLOVideoTracker:
-    def __init__(self, video_path, sio, model_path, skip_interval, resized_shape, video_id):
+    def __init__(self, video_path, sio, model_path,
+                 skip_interval, resized_shape, video_id):
         self.video_path = video_path
         self.sio = sio
         self.model_path = model_path
@@ -169,84 +224,82 @@ class YOLOVideoTracker:
         self.frame_counter = -1
         self.video_id = video_id
 
-        # For storing last known boxes and embeddings
+        # last known boxes & local track IDs
         self.last_xyxy = []
         self.last_ids = []
-        # Dictionary to store embeddings and class labels: {track_id: (embedding, class_id)}
+        # embeddings: track_id -> (embedding, class_id, local_color, display_id, display_color)
         self.embeddings = {}
-        # ReID model instance
         self.reid_model = ReIDModel(self.device)
 
     def process_frame(self, frame):
-        results = self.model.track(
-            frame, persist=True, verbose=False, device=self.device
-        )
-
+        """Run YOLO tracking, compute embeddings, store them, then do a preliminary draw."""
         self.last_xyxy = []
         self.last_ids = []
+
+        results = self.model.track(
+            frame, persist=True, verbose=False, device=self.device)
 
         if results and len(results) > 0 and results[0].boxes:
             for i, box in enumerate(results[0].boxes.xyxy):
                 x1, y1, x2, y2 = map(int, box[:4])
-                # Get unique tracking ID
+                # YOLO track ID
                 track_id = int(results[0].boxes.id[i]
-                               if results[0].boxes.id is not None else i)
-                # Attempt to retrieve class id (if provided by YOLO)
+                               ) if results[0].boxes.id is not None else i
+                # YOLO class
                 class_id = int(
-                    results[0].boxes.cls[i]) if results[0].boxes.cls is not None else None
+                    results[0].boxes.cls[i]) if results[0].boxes.cls is not None else 0
 
                 self.last_xyxy.append((x1, y1, x2, y2))
                 self.last_ids.append(track_id)
 
-                # Only compute the embedding the first time this track_id is seen
+                # Compute embedding
+
+                # If new track, init with local color = display color, local ID = display ID
                 if track_id not in self.embeddings:
-                    # Crop the detection from the frame; note: adjust if needed for padding etc.
                     crop = frame[y1:y2, x1:x2]
                     embedding = self.reid_model.get_embedding(crop)
-                    # Save a tuple of (embedding, class_id) for later use (e.g. cosine similarity comparisons)
-                    color = (random.randint(0, 255), random.randint(
-                        0, 255), random.randint(0, 255))
-                    self.embeddings[track_id] = (embedding, class_id, color)
-            # Filter embeddings: remove entries for tracks not present in this frame
+                    color = (
+                        random.randint(0, 255),
+                        random.randint(0, 255),
+                        random.randint(0, 255)
+                    )
+                    self.embeddings[track_id] = (
+                        embedding,        # embedding
+                        class_id,         # class
+                        color,            # local_color
+                        # display_id (initially same as YOLO ID)
+                        track_id,
+                        # display_color (same as local color initially)
+                        color
+                    )
+
+            # Remove embeddings for IDs not seen this frame
             active_ids = set(self.last_ids)
             self.embeddings = {
-                tid: emb for tid, emb in self.embeddings.items() if tid in active_ids}
+                tid: v for tid, v in self.embeddings.items() if tid in active_ids
+            }
 
-            # Draw the new boxes on this frame (and optionally display the class)
-            for (x1, y1, x2, y2), track_id in zip(self.last_xyxy, self.last_ids):
-                color = self.embeddings[track_id][2]
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
-                cv2.putText(frame, f'ID: {int(track_id)}',
-                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, color, 1)
-
-        return frame
+        return self.draw_last_boxes(frame)
 
     def draw_last_boxes(self, frame):
         """
-        Draw the old bounding boxes (from self.last_xyxy/self.last_ids)
-        on the given frame without running YOLO again.
+        Draw bounding boxes using the 'display_id' and 'display_color'
+        from self.embeddings, not the original YOLO ID/color (unless they match).
         """
         for (x1, y1, x2, y2), track_id in zip(self.last_xyxy, self.last_ids):
-            color = self.embeddings[track_id][2]
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
-            cv2.putText(frame, f'ID: {int(track_id)}',
-                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, self.font_size, color, 1)
-        return frame
+            if track_id not in self.embeddings:
+                continue
 
-    # def compute_cosine_similarity(self, track_id1, track_id2):
-    #     """
-    #     Example helper: Compute cosine similarity between embeddings for two track_ids,
-    #     but only if they belong to the same class. Returns None if classes differ or
-    #     if embeddings are not available.
-    #     """
-    #     if track_id1 in self.embeddings and track_id2 in self.embeddings:
-    #         emb1, class1 = self.embeddings[track_id1]
-    #         emb2, class2 = self.embeddings[track_id2]
-    #         if class1 == class2:
-    #             # Cosine similarity (embeddings assumed to be normalized)
-    #             similarity = np.dot(emb1, emb2)
-    #             return similarity
-    #     return None
+            # Unpack
+            embedding, class_id, local_color, display_id, display_color = self.embeddings[
+                track_id]
+
+            cv2.rectangle(frame, (x1, y1), (x2, y2), display_color, 2)
+            cv2.putText(frame, f'ID: {display_id}',
+                        (x1, max(0, y1 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        self.font_size, display_color, 1)
+        return frame
 
     async def send_image_to_frontend(self, image):
         _, buffer = cv2.imencode('.jpg', image)
