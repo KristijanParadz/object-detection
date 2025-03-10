@@ -83,6 +83,11 @@ class GlobalIDManager:
             blended /= norm
         self.global_tracks[global_id] = (blended, cls_id, color)
 
+    def reset(self):
+        """Clear all global tracks and reset global ID count."""
+        self.global_tracks.clear()
+        self.next_global_id = 1
+
 
 class YOLOVideoTracker:
     def __init__(self, video_path, sio, model_path, skip_interval,
@@ -212,6 +217,10 @@ class MultiVideoSingleLoop:
 
     def stop(self):
         self.stopped = True
+        for tracker in self.trackers:
+            if tracker.cap.isOpened():
+                tracker.cap.release()
+        self.trackers = []
 
     def pause(self):
         self.paused = True
@@ -220,8 +229,9 @@ class MultiVideoSingleLoop:
         self.paused = False
 
     async def reset(self):
-        self.stopped = True
+        self.stop()
         await asyncio.sleep(0.1)
+        self.global_manager.reset()
         self._init_trackers()
         self.stopped = False
         self.paused = False
