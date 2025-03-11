@@ -145,7 +145,7 @@ class YOLOVideoTracker:
             data = self.tracks[local_id]
             g_id = data["global_id"]
             color = self.global_manager.get_color(g_id)
-            text = f"GID: {g_id}"
+            text = f"ID:{g_id}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, text, (x1, max(0, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
@@ -157,7 +157,7 @@ class YOLOVideoTracker:
         await self.sio.emit('image', {"video_id": self.video_id, "image": base64_jpg})
 
 
-class MultiVideoSingleLoop:
+class MultiVideoProcessor:
     def __init__(self, video_paths, sio,
                  model_path='yolov8n.pt',
                  skip_interval=5,

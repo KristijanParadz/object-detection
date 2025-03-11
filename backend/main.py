@@ -3,7 +3,7 @@ import socketio
 import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from test import MultiVideoSingleLoop
+from test import MultiVideoProcessor
 
 # 1. Create a Socket.IO server (async_mode="asgi" is important for FastAPI/ASGI apps).
 sio = socketio.AsyncServer(
@@ -66,7 +66,7 @@ async def start(sid):
     ]
 
     # Create a new MultiVideoSingleLoop instance
-    multi_video_tracker = MultiVideoSingleLoop(
+    multi_video_tracker = MultiVideoProcessor(
         video_paths=video_paths,
         sio=sio
     )
