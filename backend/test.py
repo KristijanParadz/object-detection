@@ -167,7 +167,7 @@ class YOLOVideoTracker:
 
                 crop = frame[y1:y2, x1:x2]
 
-                # If we haven't seen this local_id before, create it
+                # If this local ID hasn't been seen before, create track
                 if local_id not in self.tracks:
                     new_emb = self.reid_model.get_embedding(crop)
                     g_id = self.global_manager.match_or_create(
@@ -183,19 +183,50 @@ class YOLOVideoTracker:
                     track_data = self.tracks[local_id]
                     if (self.frame_counter - track_data["last_update_frame"]) >= self.embedding_update_interval:
                         new_emb = self.reid_model.get_embedding(crop)
-                        # Append new_emb to that ID's gallery
                         self.global_manager.update_gallery(
                             track_data["global_id"], new_emb)
                         track_data["last_embedding"] = new_emb
                         track_data["last_update_frame"] = self.frame_counter
 
-            # Remove tracks not seen this frame
+            # Remove local IDs not seen in this frame
             active_ids = set(self.last_ids)
             self.tracks = {
                 tid: data
                 for tid, data in self.tracks.items()
                 if tid in active_ids
             }
+
+            # ----------------------------------------------------
+            #   REMOVE DUPLICATES (same global ID) IN THIS FRAME
+            # ----------------------------------------------------
+            from collections import defaultdict
+
+            # Build map: global_id -> [local_ids that have this gID in this frame]
+            g_id_map = defaultdict(list)
+            for l_id in self.last_ids:
+                g_id = self.tracks[l_id]["global_id"]
+                g_id_map[g_id].append(l_id)
+
+            # For each global ID that appears multiple times, keep the first local ID
+            # and remove the others from self.tracks, last_xyxy, last_ids
+            for g_id, local_ids_for_gid in g_id_map.items():
+                if len(local_ids_for_gid) > 1:
+                    # Keep the first local ID, remove the rest
+                    first_id = local_ids_for_gid[0]
+                    for duplicate_id in local_ids_for_gid[1:]:
+                        self.tracks.pop(duplicate_id, None)
+
+            # Now rebuild self.last_xyxy / self.last_ids to include only surviving local IDs
+            new_last_xyxy = []
+            new_last_ids = []
+            for (xy, l_id) in zip(self.last_xyxy, self.last_ids):
+                if l_id in self.tracks:
+                    new_last_xyxy.append(xy)
+                    new_last_ids.append(l_id)
+
+            self.last_xyxy = new_last_xyxy
+            self.last_ids = new_last_ids
+            # ----------------------------------------------------
 
         return self.draw_last_boxes(frame)
 
