@@ -41,7 +41,7 @@ class ReIDModel:
 
 
 class GlobalIDManager:
-    def __init__(self, similarity_threshold=0.7):
+    def __init__(self, similarity_threshold):
         self.similarity_threshold = similarity_threshold
         self.global_tracks = {}
         self.global_id_to_class = {}
@@ -108,7 +108,8 @@ class GlobalIDManager:
 
 class YOLOVideoTracker:
     def __init__(self, video_path, sio, model_path, skip_interval,
-                 resized_shape, video_id, global_manager):
+                 resized_shape, video_id, global_manager,
+                 embedding_update_interval):
         self.video_path = video_path
         self.sio = sio
         self.model_path = model_path
@@ -124,6 +125,7 @@ class YOLOVideoTracker:
         self.last_ids = []
         self.reid_model = ReIDModel(self.device)
         self.global_manager = global_manager
+        self.embedding_update_interval = embedding_update_interval
 
     def process_frame(self, frame):
         self.last_xyxy.clear()
@@ -140,18 +142,32 @@ class YOLOVideoTracker:
                 class_id = int(clss[i]) if clss is not None else 0
                 self.last_xyxy.append((x1, y1, x2, y2))
                 self.last_ids.append(local_id)
+                crop = frame[y1:y2, x1:x2]
+
                 if local_id not in self.tracks:
-                    crop = frame[y1:y2, x1:x2]
                     emb = self.reid_model.get_embedding(crop)
                     g_id = self.global_manager.match_or_create(emb, class_id)
                     self.tracks[local_id] = {
                         "class_id": class_id,
                         "global_id": g_id,
-                        "embedding": emb
+                        "embedding": emb,
+                        "last_update_frame": self.frame_counter
                     }
+                else:
+                    track_data = self.tracks[local_id]
+                    if (self.frame_counter - track_data["last_update_frame"]) >= self.embedding_update_interval:
+                        new_emb = self.reid_model.get_embedding(crop)
+                        self.global_manager.update_embedding(
+                            track_data["global_id"], new_emb)
+                        track_data["embedding"] = new_emb
+                        track_data["last_update_frame"] = self.frame_counter
+
+            # Remove any tracks that were not seen this frame
             active_ids = set(self.last_ids)
             self.tracks = {
-                tid: data for tid, data in self.tracks.items() if tid in active_ids
+                tid: data
+                for tid, data in self.tracks.items()
+                if tid in active_ids
             }
         return self.draw_last_boxes(frame)
 
@@ -200,7 +216,8 @@ class MultiVideoProcessor:
                 skip_interval=self.skip_interval,
                 resized_shape=self.resized_shape,
                 video_id=video_id,
-                global_manager=self.global_manager
+                global_manager=self.global_manager,
+                embedding_update_interval=60  # <--- you can tune this
             )
             self.trackers.append(t)
 
