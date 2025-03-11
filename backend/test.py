@@ -41,27 +41,43 @@ class ReIDModel:
 
 
 class GlobalIDManager:
-    def __init__(self, similarity_threshold):
+    """
+    Now storing a *gallery* of embeddings for each ID instead of a single embedding.
+    """
+
+    def __init__(self, similarity_threshold, max_gallery_size=5):
         self.similarity_threshold = similarity_threshold
+        self.max_gallery_size = max_gallery_size
+        # Structure:
+        # self.global_tracks[class_id][global_id] = ([emb1, emb2, ...], color)
         self.global_tracks = {}
         self.global_id_to_class = {}
         self.next_global_id = 1
 
-    def match_or_create(self, embedding, class_id):
+    def match_or_create(self, new_embedding, class_id):
+        """
+        1) For each existing global_id in class_id, compute max similarity vs. that ID’s gallery.
+        2) If max similarity >= threshold, return that ID.
+        3) Else create a new ID (with an empty gallery to start) and return it.
+        """
         if class_id not in self.global_tracks:
             self.global_tracks[class_id] = {}
 
         best_g_id = None
         best_sim = -1.0
-        for g_id, (g_emb, g_color) in self.global_tracks[class_id].items():
-            sim = float(np.dot(embedding, g_emb))
-            if sim > best_sim:
-                best_sim = sim
+        for g_id, (gallery, _) in self.global_tracks[class_id].items():
+            # Compute similarity to each embedding in that gallery
+            sim_list = [float(np.dot(new_embedding, emb)) for emb in gallery]
+            max_sim = max(sim_list) if sim_list else -1.0
+            if max_sim > best_sim:
+                best_sim = max_sim
                 best_g_id = g_id
 
+        # Decide whether to match or create new
         if best_g_id is not None and best_sim >= self.similarity_threshold:
             return best_g_id
 
+        # Create new ID
         color = (
             random.randint(0, 255),
             random.randint(0, 255),
@@ -70,32 +86,38 @@ class GlobalIDManager:
         new_g_id = self.next_global_id
         self.next_global_id += 1
 
-        self.global_tracks[class_id][new_g_id] = (embedding, color)
+        # Initialize with a 1-entry gallery
+        self.global_tracks[class_id][new_g_id] = ([new_embedding], color)
         self.global_id_to_class[new_g_id] = class_id
-
         return new_g_id
 
     def get_color(self, global_id):
         if global_id not in self.global_id_to_class:
-            return (255, 255, 255)  # default/fallback
+            return (255, 255, 255)  # fallback
         cls_id = self.global_id_to_class[global_id]
         if cls_id in self.global_tracks and global_id in self.global_tracks[cls_id]:
             return self.global_tracks[cls_id][global_id][1]
         return (255, 255, 255)
 
-    def update_embedding(self, global_id, new_embedding, alpha=0.7):
+    def update_gallery(self, global_id, new_embedding):
+        """
+        Append new_embedding to the gallery for that global_id (if it exists),
+        and remove oldest if we exceed max_gallery_size.
+        """
         if global_id not in self.global_id_to_class:
             return
         cls_id = self.global_id_to_class[global_id]
         if cls_id not in self.global_tracks or global_id not in self.global_tracks[cls_id]:
             return
 
-        old_emb, color = self.global_tracks[cls_id][global_id]
-        blended = alpha * old_emb + (1.0 - alpha) * new_embedding
-        norm = np.linalg.norm(blended)
-        if norm > 0:
-            blended /= norm
-        self.global_tracks[cls_id][global_id] = (blended, color)
+        gallery, color = self.global_tracks[cls_id][global_id]
+        gallery.append(new_embedding)
+
+        # If the gallery is too big, drop the oldest
+        if len(gallery) > self.max_gallery_size:
+            gallery.pop(0)  # remove from front (oldest)
+
+        self.global_tracks[cls_id][global_id] = (gallery, color)
 
     def reset(self):
         self.global_tracks.clear()
@@ -106,7 +128,7 @@ class GlobalIDManager:
 class YOLOVideoTracker:
     def __init__(self, video_path, sio, model_path, skip_interval,
                  resized_shape, video_id, global_manager,
-                 embedding_update_interval):
+                 embedding_update_interval=60):
         self.video_path = video_path
         self.sio = sio
         self.model_path = model_path
@@ -117,7 +139,8 @@ class YOLOVideoTracker:
         self.model = YOLO(self.model_path).to(self.device)
         self.cap = cv2.VideoCapture(self.video_path)
         self.frame_counter = -1
-        self.tracks = {}  # local_id -> {"class_id", "global_id", "embedding", "last_update_frame"}
+        # local_id -> {"class_id", "global_id", "last_embedding", "last_update_frame"}
+        self.tracks = {}
         self.last_xyxy = []
         self.last_ids = []
         self.reid_model = ReIDModel(self.device)
@@ -144,26 +167,29 @@ class YOLOVideoTracker:
 
                 crop = frame[y1:y2, x1:x2]
 
+                # If we haven't seen this local_id before, create it
                 if local_id not in self.tracks:
-                    emb = self.reid_model.get_embedding(crop)
-                    g_id = self.global_manager.match_or_create(emb, class_id)
+                    new_emb = self.reid_model.get_embedding(crop)
+                    g_id = self.global_manager.match_or_create(
+                        new_emb, class_id)
                     self.tracks[local_id] = {
                         "class_id": class_id,
                         "global_id": g_id,
-                        "embedding": emb,
+                        "last_embedding": new_emb,
                         "last_update_frame": self.frame_counter
                     }
                 else:
+                    # Possibly update the gallery if enough frames passed
                     track_data = self.tracks[local_id]
-                    # Update embedding only if enough frames have passed
                     if (self.frame_counter - track_data["last_update_frame"]) >= self.embedding_update_interval:
                         new_emb = self.reid_model.get_embedding(crop)
-                        self.global_manager.update_embedding(
+                        # Append new_emb to that ID's gallery
+                        self.global_manager.update_gallery(
                             track_data["global_id"], new_emb)
-                        track_data["embedding"] = new_emb
+                        track_data["last_embedding"] = new_emb
                         track_data["last_update_frame"] = self.frame_counter
 
-            # Remove any tracks not seen this frame
+            # Remove tracks not seen this frame
             active_ids = set(self.last_ids)
             self.tracks = {
                 tid: data
@@ -188,8 +214,8 @@ class YOLOVideoTracker:
 
     def replace_global_id(self, old_g_id, new_g_id):
         """
-        Called when duplicates are merged in the GlobalIDManager.
         If a track references old_g_id, switch it to new_g_id.
+        (Used in deduplication merges.)
         """
         for track_data in self.tracks.values():
             if track_data["global_id"] == old_g_id:
@@ -214,13 +240,11 @@ class MultiVideoProcessor:
         self.paused = False
         self.stopped = False
 
-        # Lower threshold means more merges.
-        # You can adjust or even separate "create-threshold" from "merge-threshold".
-        self.global_manager = GlobalIDManager(similarity_threshold=0.3)
+        # We use 0.3 for creation matching, and up to 5 embeddings per ID
+        self.global_manager = GlobalIDManager(
+            similarity_threshold=0.3, max_gallery_size=5)
 
         self._init_trackers()
-
-        # Keep a global frame counter to decide when to do deduplication
         self.global_frame_counter = 0
 
     def _init_trackers(self):
@@ -241,48 +265,45 @@ class MultiVideoProcessor:
 
     def unify_ids(self, cls_id, keep_id, remove_id):
         """
-        Merge 'remove_id' into 'keep_id' for the given class.
-        1) Blend embeddings
-        2) Remove 'remove_id' from global dict
-        3) Update references in all trackers
+        Merge 'remove_id' into 'keep_id' for that class.
+        Now we unify the *galleries* of keep_id and remove_id.
         """
-        keep_emb, keep_color = self.global_manager.global_tracks[cls_id][keep_id]
-        remove_emb, _ = self.global_manager.global_tracks[cls_id][remove_id]
+        keep_gallery, keep_color = self.global_manager.global_tracks[cls_id][keep_id]
+        remove_gallery, _ = self.global_manager.global_tracks[cls_id][remove_id]
 
-        # Example: blend them 50/50
-        merged_emb = (keep_emb + remove_emb) / 2.0
-        norm = np.linalg.norm(merged_emb)
-        if norm > 0:
-            merged_emb /= norm
+        # Concatenate
+        merged_gallery = keep_gallery + remove_gallery
+        # Possibly slice if it exceeds max_gallery_size
+        if len(merged_gallery) > self.global_manager.max_gallery_size:
+            # keep the newest
+            merged_gallery = merged_gallery[-self.global_manager.max_gallery_size:]
 
-        # Update the kept ID with the merged embedding
+        # Update the keep_id with merged gallery
         self.global_manager.global_tracks[cls_id][keep_id] = (
-            merged_emb, keep_color)
+            merged_gallery, keep_color)
 
         # Remove the old ID
         del self.global_manager.global_tracks[cls_id][remove_id]
         del self.global_manager.global_id_to_class[remove_id]
 
-        # Update all trackers, if any were pointing to remove_id
+        # Update references in all trackers
         for tracker in self.trackers:
             tracker.replace_global_id(remove_id, keep_id)
 
-    def deduplicate_global_tracks(self, similarity):
+    def deduplicate_global_tracks(self, similarity=0.5):
         """
-        Occasionally called to remove near-duplicate IDs.
-        For each class_id, check all pairs of IDs. If cos-sim > similarity, unify them.
+        Example dedup logic: For each class, check all pairs of IDs. If
+        max similarity among their galleries is above 'similarity', unify them.
         """
         for cls_id, id_dict in self.global_manager.global_tracks.items():
-            # We'll modify this dict, so do pairwise checking on a list of IDs
             all_ids = list(id_dict.keys())
             i = 0
             while i < len(all_ids):
                 keep_id = all_ids[i]
                 if keep_id not in id_dict:
-                    # Might have been removed by a previous merge
                     i += 1
                     continue
-                keep_emb, _ = id_dict[keep_id]
+                keep_gallery, _ = id_dict[keep_id]
 
                 j = i + 1
                 while j < len(all_ids):
@@ -290,26 +311,32 @@ class MultiVideoProcessor:
                     if check_id not in id_dict:
                         j += 1
                         continue
-                    check_emb, _ = id_dict[check_id]
+                    check_gallery, _ = id_dict[check_id]
 
-                    # Compare embeddings
-                    sim = float(np.dot(keep_emb, check_emb))
-                    if sim > similarity:
-                        # We unify them. We'll keep the smaller ID just as an example:
+                    # Compare each embedding in keep_gallery to each in check_gallery
+                    # Then look at the max similarity
+                    # For performance, you might do an NxM dot product. We'll just do a double loop.
+                    max_sim = -1.0
+                    for emb1 in keep_gallery:
+                        for emb2 in check_gallery:
+                            sim = float(np.dot(emb1, emb2))
+                            if sim > max_sim:
+                                max_sim = sim
+
+                    if max_sim > similarity:
+                        # unify them
                         id_to_keep = min(keep_id, check_id)
                         id_to_remove = max(keep_id, check_id)
                         self.unify_ids(cls_id, id_to_keep, id_to_remove)
 
-                        # If we removed 'id_to_remove', it won't exist anymore
-                        # remove it from all_ids
                         all_ids.remove(id_to_remove)
 
-                        # If we changed keep_id, we might rename keep_id to id_to_keep
+                        # If we changed the keep_id, fix references
                         if keep_id != id_to_keep:
                             keep_id, id_to_remove = id_to_keep, keep_id
-                            # We need to fix keep_emb
-                            keep_emb, _ = self.global_manager.global_tracks[cls_id][keep_id]
-                        # Do NOT increment j; we want to re-check the new keep_id vs next IDs
+                            keep_gallery, _ = id_dict[keep_id]
+
+                        # Do not increment j yet, re-check with new keep_id
                     else:
                         j += 1
                 i += 1
@@ -320,7 +347,6 @@ class MultiVideoProcessor:
             if self.paused:
                 await asyncio.sleep(0.05)
                 continue
-
             any_frame_ok = False
             for tracker in self.trackers:
                 if not tracker.cap.isOpened():
@@ -329,7 +355,6 @@ class MultiVideoProcessor:
                 if not success:
                     tracker.cap.release()
                     continue
-
                 any_frame_ok = True
                 tracker.frame_counter += 1
                 self.global_frame_counter += 1
@@ -339,13 +364,18 @@ class MultiVideoProcessor:
                 if tracker.frame_counter % tracker.skip_interval == 0:
                     processed_frame = tracker.process_frame(frame)
                 else:
-                    # Just draw known boxes
                     processed_frame = tracker.draw_last_boxes(frame)
+
                 await tracker.send_image_to_frontend(processed_frame)
+
+            # Occasionally run deduplication
+            # (Tune how often you want to do this for performance)
             if self.global_frame_counter % 200 == 0:
                 self.deduplicate_global_tracks(similarity=0.5)
+
             if not any_frame_ok:
                 break
+
         for tracker in self.trackers:
             if tracker.cap.isOpened():
                 tracker.cap.release()
