@@ -201,9 +201,9 @@ class YOLOVideoTracker:
                 else:
                     track_data = self.tracks[local_id]
                     if (self.update_embeddings and
-                                self.frame_counter -
+                        self.frame_counter -
                             track_data["last_update_frame"]
-                            ) >= self.embedding_update_interval:
+                        ) >= self.embedding_update_interval:
                         new_emb = self.reid_model.get_embedding(crop)
                         self.global_manager.update_embedding(
                             track_data["global_id"], new_emb)
@@ -349,8 +349,6 @@ class MultiVideoProcessor:
         self.global_manager = GlobalIDManager(
             similarity_threshold=similarity_threshold)
 
-        self.global_frame_counter = 0
-
         # If user didn't pass labels, we'll store None for each
         if display_labels is None:
             display_labels = [None] * len(video_paths)
@@ -384,7 +382,6 @@ class MultiVideoProcessor:
             ok = tracker.read_and_process_one_frame()
             if ok:
                 any_frame_ok = True
-                self.global_frame_counter += 1
 
         if not any_frame_ok:
             self.stop()

@@ -252,9 +252,6 @@ class MultiVideoProcessor:
 
         self._init_trackers()
 
-        # Keep a global frame counter to decide when to do deduplication
-        self.global_frame_counter = 0
-
     def _init_trackers(self):
         self.trackers = []
         for vp in self.video_paths:
@@ -270,81 +267,6 @@ class MultiVideoProcessor:
                 embedding_update_interval=60
             )
             self.trackers.append(t)
-
-    def unify_ids(self, cls_id, keep_id, remove_id):
-        """
-        Merge 'remove_id' into 'keep_id' for the given class.
-        1) Blend embeddings
-        2) Remove 'remove_id' from global dict
-        3) Update references in all trackers
-        """
-        keep_emb, keep_color = self.global_manager.global_tracks[cls_id][keep_id]
-        remove_emb, _ = self.global_manager.global_tracks[cls_id][remove_id]
-
-        # Example: blend them 50/50
-        merged_emb = (keep_emb + remove_emb) / 2.0
-        norm = np.linalg.norm(merged_emb)
-        if norm > 0:
-            merged_emb /= norm
-
-        # Update the kept ID with the merged embedding
-        self.global_manager.global_tracks[cls_id][keep_id] = (
-            merged_emb, keep_color)
-
-        # Remove the old ID
-        del self.global_manager.global_tracks[cls_id][remove_id]
-        del self.global_manager.global_id_to_class[remove_id]
-
-        # Update all trackers, if any were pointing to remove_id
-        for tracker in self.trackers:
-            tracker.replace_global_id(remove_id, keep_id)
-
-    def deduplicate_global_tracks(self, similarity):
-        """
-        Occasionally called to remove near-duplicate IDs.
-        For each class_id, check all pairs of IDs. If cos-sim > similarity, unify them.
-        """
-        for cls_id, id_dict in self.global_manager.global_tracks.items():
-            # We'll modify this dict, so do pairwise checking on a list of IDs
-            all_ids = list(id_dict.keys())
-            i = 0
-            while i < len(all_ids):
-                keep_id = all_ids[i]
-                if keep_id not in id_dict:
-                    # Might have been removed by a previous merge
-                    i += 1
-                    continue
-                keep_emb, _ = id_dict[keep_id]
-
-                j = i + 1
-                while j < len(all_ids):
-                    check_id = all_ids[j]
-                    if check_id not in id_dict:
-                        j += 1
-                        continue
-                    check_emb, _ = id_dict[check_id]
-
-                    # Compare embeddings
-                    sim = float(np.dot(keep_emb, check_emb))
-                    if sim > similarity:
-                        # We unify them. We'll keep the smaller ID just as an example:
-                        id_to_keep = min(keep_id, check_id)
-                        id_to_remove = max(keep_id, check_id)
-                        self.unify_ids(cls_id, id_to_keep, id_to_remove)
-
-                        # If we removed 'id_to_remove', it won't exist anymore
-                        # remove it from all_ids
-                        all_ids.remove(id_to_remove)
-
-                        # If we changed keep_id, we might rename keep_id to id_to_keep
-                        if keep_id != id_to_keep:
-                            keep_id, id_to_remove = id_to_keep, keep_id
-                            # We need to fix keep_emb
-                            keep_emb, _ = self.global_manager.global_tracks[cls_id][keep_id]
-                        # Do NOT increment j; we want to re-check the new keep_id vs next IDs
-                    else:
-                        j += 1
-                i += 1
 
     async def run(self):
         self.stopped = False
@@ -364,7 +286,6 @@ class MultiVideoProcessor:
 
                 any_frame_ok = True
                 tracker.frame_counter += 1
-                self.global_frame_counter += 1
 
                 frame = cv2.resize(frame, tracker.resized_shape)
 
@@ -374,8 +295,6 @@ class MultiVideoProcessor:
                     # Just draw known boxes
                     processed_frame = tracker.draw_last_boxes(frame)
                 await tracker.send_image_to_frontend(processed_frame)
-            if self.global_frame_counter % 200 == 0:
-                self.deduplicate_global_tracks(similarity=0.5)
             if not any_frame_ok:
                 break
         for tracker in self.trackers:
@@ -402,5 +321,4 @@ class MultiVideoProcessor:
         self._init_trackers()
         self.stopped = False
         self.paused = False
-        self.global_frame_counter = 0
         asyncio.create_task(self.run())
