@@ -135,6 +135,7 @@ class YOLOVideoTracker:
             resized_shape,
             global_manager,
             embedding_update_interval,
+            update_embeddings,
             display_label=None,
     ):
         self.video_path = video_path
@@ -143,6 +144,7 @@ class YOLOVideoTracker:
         self.resized_shape = resized_shape
         self.embedding_update_interval = embedding_update_interval
         self.global_manager = global_manager
+        self.update_embeddings = update_embeddings
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.model = YOLO(self.model_path).to(self.device)
@@ -198,9 +200,10 @@ class YOLOVideoTracker:
                     }
                 else:
                     track_data = self.tracks[local_id]
-                    if (
-                        self.frame_counter - track_data["last_update_frame"]
-                    ) >= self.embedding_update_interval:
+                    if (self.update_embeddings and
+                            self.frame_counter -
+                        track_data["last_update_frame"]
+                        ) >= self.embedding_update_interval:
                         new_emb = self.reid_model.get_embedding(crop)
                         self.global_manager.update_embedding(
                             track_data["global_id"], new_emb)
@@ -326,6 +329,8 @@ class MultiVideoProcessor:
             resized_shape=(640, 360),
             embedding_update_interval=60,
             similarity_threshold=0.3,
+            update_embeddings=True,
+            unify=True,
             display_labels=None
     ):
         """
@@ -336,6 +341,7 @@ class MultiVideoProcessor:
         self.skip_interval = skip_interval
         self.resized_shape = resized_shape
         self.embedding_update_interval = embedding_update_interval
+        self.unify = unify
 
         # State flags
         self.paused = False
@@ -361,7 +367,8 @@ class MultiVideoProcessor:
                 resized_shape=self.resized_shape,
                 global_manager=self.global_manager,
                 embedding_update_interval=self.embedding_update_interval,
-                display_label=lbl
+                display_label=lbl,
+                update_embeddings=update_embeddings,
             )
             self.trackers.append(t)
 
@@ -456,7 +463,7 @@ class MultiVideoProcessor:
                 any_frame_ok = True
                 self.global_frame_counter += 1
 
-        if self.global_frame_counter % 200 == 0:
+        if self.unify and self.global_frame_counter % 200 == 0:
             self.deduplicate_global_tracks(similarity=0.5)
         # If no tracker returned a valid frame, we've reached end of all videos
         if not any_frame_ok:
@@ -548,7 +555,7 @@ class MainWindow(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.multiproc.run_one_cycle)
         # ~20 FPS is 50 ms interval
-        self.timer.start(5)
+        self.timer.start(15)
 
     def pause_videos(self):
         self.multiproc.pause()
