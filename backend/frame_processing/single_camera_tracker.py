@@ -107,15 +107,6 @@ class YOLOVideoTracker:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
         return frame
 
-    def replace_global_id(self, old_g_id, new_g_id):
-        """
-        Called when duplicates are merged in the GlobalIDManager.
-        If a track references old_g_id, switch it to new_g_id.
-        """
-        for track_data in self.tracks.values():
-            if track_data["global_id"] == old_g_id:
-                track_data["global_id"] = new_g_id
-
     async def send_image_to_frontend(self, image):
         _, buffer = cv2.imencode('.jpg', image)
         base64_jpg = base64.b64encode(buffer).decode('utf-8')
