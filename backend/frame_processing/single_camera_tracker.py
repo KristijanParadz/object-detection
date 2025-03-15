@@ -27,6 +27,34 @@ class YOLOVideoTracker:
         self.global_manager = global_manager
         self.embedding_update_interval = embedding_update_interval
 
+    def _remove_local_duplicates(self):
+        active_ids = set(self.last_ids)
+        self.tracks = {
+            tid: data
+            for tid, data in self.tracks.items()
+            if tid in active_ids
+        }
+
+        g_id_map = defaultdict(list)
+        for l_id in self.last_ids:
+            g_id = self.tracks[l_id]["global_id"]
+            g_id_map[g_id].append(l_id)
+
+        for g_id, local_ids_for_gid in g_id_map.items():
+            if len(local_ids_for_gid) > 1:
+                for duplicate_id in local_ids_for_gid[1:]:
+                    self.tracks.pop(duplicate_id, None)
+
+        new_last_xyxy = []
+        new_last_ids = []
+        for (xy, l_id) in zip(self.last_xyxy, self.last_ids):
+            if l_id in self.tracks:
+                new_last_xyxy.append(xy)
+                new_last_ids.append(l_id)
+
+        self.last_xyxy = new_last_xyxy
+        self.last_ids = new_last_ids
+
     def process_frame(self, frame):
         self.last_xyxy.clear()
         self.last_ids.clear()
@@ -65,32 +93,7 @@ class YOLOVideoTracker:
                         track_data["embedding"] = new_emb
                         track_data["last_update_frame"] = self.frame_counter
 
-            active_ids = set(self.last_ids)
-            self.tracks = {
-                tid: data
-                for tid, data in self.tracks.items()
-                if tid in active_ids
-            }
-
-            g_id_map = defaultdict(list)
-            for l_id in self.last_ids:
-                g_id = self.tracks[l_id]["global_id"]
-                g_id_map[g_id].append(l_id)
-
-            for g_id, local_ids_for_gid in g_id_map.items():
-                if len(local_ids_for_gid) > 1:
-                    for duplicate_id in local_ids_for_gid[1:]:
-                        self.tracks.pop(duplicate_id, None)
-
-            new_last_xyxy = []
-            new_last_ids = []
-            for (xy, l_id) in zip(self.last_xyxy, self.last_ids):
-                if l_id in self.tracks:
-                    new_last_xyxy.append(xy)
-                    new_last_ids.append(l_id)
-
-            self.last_xyxy = new_last_xyxy
-            self.last_ids = new_last_ids
+            self._remove_local_duplicates()
 
         return self.draw_last_boxes(frame)
 
